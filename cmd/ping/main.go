@@ -36,5 +36,5 @@ func main() {
 	}
 
 	// Print results
-	pinger.PrintResults(results)
+	pinger.PrintResults(results, *host, *packetSize)
 }

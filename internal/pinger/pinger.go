@@ -24,6 +24,7 @@ type PingResult struct {
 	SequenceNumber int
 	RTT            time.Duration
 	Success        bool
+	From           string
 }
 
 // Pinger handles the ping functionality
@@ -132,7 +133,7 @@ func (p *Pinger) Ping() ([]PingResult, error) {
 			return nil, fmt.Errorf("set deadline error: %v", err)
 		}
 
-		n, _, err := conn.ReadFrom(rb)
+		n, from, err := conn.ReadFrom(rb)
 		if err != nil {
 			results = append(results, PingResult{
 				SequenceNumber: seq,
@@ -159,6 +160,7 @@ func (p *Pinger) Ping() ([]PingResult, error) {
 				SequenceNumber: seq,
 				RTT:            rtt,
 				Success:        true,
+				From:           from.String(),
 			})
 		default:
 			results = append(results, PingResult{
@@ -175,36 +177,42 @@ func (p *Pinger) Ping() ([]PingResult, error) {
 }
 
 // PrintResults displays ping results
-func PrintResults(results []PingResult) {
-	successCount := 0
-	totalRTT := time.Duration(0)
+func PrintResults(results []PingResult, host string, packetSize int) {
+	fmt.Printf("PING %s (%s) %d bytes of data.\n", host, host, packetSize)
 
-	fmt.Println("Ping Results:")
+	successCount := 0
+	var min, max, total time.Duration
+
 	for _, result := range results {
 		if result.Success {
+			fmt.Printf("%d bytes from %s: icmp_seq=%d time=%v\n",
+				packetSize, result.From, result.SequenceNumber, result.RTT)
 			successCount++
-			totalRTT += result.RTT
-			fmt.Printf("Sequence %d: Success - RTT: %v\n", result.SequenceNumber, result.RTT)
+
+			if min == 0 || result.RTT < min {
+				min = result.RTT
+			}
+			if max == 0 || result.RTT > max {
+				max = result.RTT
+			}
+			total += result.RTT
 		} else {
-			fmt.Printf("Sequence %d: Failed\n", result.SequenceNumber)
+			fmt.Printf("Request timeout for icmp_seq %d\n", result.SequenceNumber)
 		}
 	}
 
 	// Calculate statistics
-	successRate := float64(successCount) / float64(len(results)) * 100
-	var avgRTT time.Duration
+	packetLoss := float64(len(results)-successCount) / float64(len(results)) * 100
+	var avg time.Duration
 	if successCount > 0 {
-		avgRTT = totalRTT / time.Duration(successCount)
+		avg = total / time.Duration(successCount)
 	}
 
-	fmt.Printf("\nSummary:\n")
-	fmt.Printf("Total Attempts: %d\n", len(results))
-	fmt.Printf("Successful Pings: %d\n", successCount)
-	fmt.Printf("Success Rate: %.2f%%\n", successRate)
+	fmt.Printf("--- %s ping statistics ---\n", host)
+	fmt.Printf("%d packets transmitted, %d received, %.1f%% packet loss, time %dms\n",
+		len(results), successCount, packetLoss, total.Milliseconds())
+
 	if successCount > 0 {
-		fmt.Printf("Average RTT: %v\n", avgRTT)
+		fmt.Printf("rtt min/avg/max = %v/%v/%v\n", min, avg, max)
 	}
 }
-
-// вывод udp icmp
-// сравнение с ping

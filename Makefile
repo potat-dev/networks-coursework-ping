@@ -1,7 +1,7 @@
 .PHONY: build clean test deps
 
 # Binary name
-BINARY_NAME=ping
+BINARY_NAME=ping.exe
 
 # Go parameters
 GOCMD=go
@@ -35,7 +35,7 @@ deps:
 	$(GOGET) -v golang.org/x/net/ipv4
 
 run: build
-	sudo ./$(BUILD_DIR)/$(BINARY_NAME)
+	./$(BUILD_DIR)/$(BINARY_NAME)
 
 install:
-	$(GOBUILD) -ldflags="$(LDFLAGS)" -o /usr/local/bin/$(BINARY_NAME) $(CMD_DIR)/main.go
+	$(GOBUILD) -ldflags="$(LDFLAGS)" -o /usr/local/bin/$(BINARY_NAME) $(CMD_DIR)/main.g
