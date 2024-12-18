@@ -1,14 +1,17 @@
 # Ping Utility
 
-A custom ping implementation in Golang with flexible configuration options.
+A custom ping implementation in Golang with flexible configuration options, supporting both ICMP and UDP protocols.
 
 ## Features
 
+-   Support for ICMP and UDP ping protocols
 -   Customizable packet size
 -   Configurable ping count
 -   Adjustable timeout and interval
--   Отображение типа пакета (ICMP)
--   Detailed ping statistics (packet loss, rtt min/avg/max)
+-   Detailed ping statistics
+-   Output similar to standard ping utility
+-   Uses common UDP ports (53, 123, 8053, 33434) to increase the chance of receiving a response
+-   Sends a DNS query packet for UDP ping to elicit a response
 
 ## Prerequisites
 
@@ -18,36 +21,21 @@ A custom ping implementation in Golang with flexible configuration options.
 ## Installation
 
 1. Clone the repository
-
     ```bash
-    git clone https://github.com/potat-dev/ping-utility.git
+    git clone https://github.com/yourusername/ping-utility.git
     cd ping-utility
     ```
 2. Install dependencies
-
     ```bash
     go mod tidy
     ```
 
 ## Usage
 
-Run the ping utility with default settings:
+Run the ping utility with default settings (ICMP to Google's DNS):
 
 ```bash
 sudo go run cmd/ping/main.go
-```
-
-**Пример вывода:**
-
-```
-PING 8.8.8.8 (8.8.8.8) 64 bytes of data.
-64 bytes from 8.8.8.8: icmp_seq=1 time=14.8 ms
-64 bytes from 8.8.8.8: icmp_seq=2 time=14.6 ms
-64 bytes from 8.8.8.8: icmp_seq=3 time=14.8 ms
-64 bytes from 8.8.8.8: icmp_seq=4 time=14.6 ms
---- 8.8.8.8 ping statistics ---
-4 packets transmitted, 4 received, 0.0% packet loss, time 59ms
-rtt min/avg/max = 14.625ms/14.732ms/14.838ms
 ```
 
 Command-line options:
@@ -63,58 +51,78 @@ Command-line options:
         Timeout for each ping (default 2s)
   -interval duration
         Interval between pings (default 1s)
+  -protocol string
+        Ping protocol (icmp or udp) (default "icmp")
+  -port int
+        Port to use for UDP ping (default 33434)
 ```
 
-### Тип пакета
+Examples:
 
-В текущей версии утилита поддерживает **только ICMP-пинг**. Поддержка UDP в настоящее время не реализована.
-
-### Форматирование вывода
-
-Вывод утилиты максимально приближен к выводу стандартной утилиты `ping`. Он включает в себя:
-
--   Заголовок с указанием целевого хоста, IP-адреса и размера пакета данных.
--   Для каждого успешного пинга: количество байт, IP-адрес, порядковый номер ICMP, время (time).
--   Статистику в конце: количество отправленных и полученных пакетов, процент потерь пакетов, общее время.
--   Статистику по времени приема-передачи (rtt): минимальное (min), среднее (avg), максимальное (max).
-
-Example:
-
-```bash
-sudo go run cmd/ping/main.go -host google.com -count 5 -size 128 -timeout 3s
-```
-
-**Пример вывода:**
-
-```
-PING google.com (142.250.183.142) 128 bytes of data.
-128 bytes from sof02s32-in-f14.1e100.net (142.250.183.142): icmp_seq=1 time=12.5 ms
-128 bytes from sof02s32-in-f14.1e100.net (142.250.183.142): icmp_seq=2 time=12.6 ms
-128 bytes from sof02s32-in-f14.1e100.net (142.250.183.142): icmp_seq=3 time=12.4 ms
-128 bytes from sof02s32-in-f14.1e100.net (142.250.183.142): icmp_seq=4 time=12.5 ms
-128 bytes from sof02s32-in-f14.1e100.net (142.250.183.142): icmp_seq=5 time=12.6 ms
---- google.com ping statistics ---
-5 packets transmitted, 5 received, 0.0% packet loss, time 4006ms
-rtt min/avg/max = 12.447ms/12.548ms/12.638ms
-```
+1. ICMP Ping to Google's DNS:
+    ```bash
+    sudo go run cmd/ping/main.go -host 8.8.8.8
+    ```
+2. ICMP Ping with Custom Parameters:
+    ```bash
+    sudo go run cmd/ping/main.go -host google.com -count 5 -size 128 -timeout 3s
+    ```
+3. Basic UDP Ping:
+    ```bash
+    sudo go run cmd/ping/main.go -host 8.8.8.8 -protocol udp
+    ```
+4. UDP Ping with Custom Port:
+    ```bash
+    sudo go run cmd/ping/main.go -host 8.8.8.8 -protocol udp -port 53 -count 3
+    ```
+5. UDP Ping to a specific domain using DNS port:
+    ```bash
+    sudo go run cmd/ping/main.go -host google.com -protocol udp -port 53 -count 4
+    ```
 
 ## Building
 
 To build the executable:
 
 ```bash
-go build -o ping cmd/ping/main.go
+make build
 ```
 
 Then run with:
 
 ```bash
-sudo ./ping
+sudo ./build/ping [options]
 ```
+
+## Makefile Targets
+
+-   `build`: Builds the ping utility executable
+-   `clean`: Cleans up the build directory
+-   `test`: Runs tests
+-   `deps`: Installs dependencies
+-   `run`: Builds and runs the ping utility
+-   `install`: Installs the ping utility to /usr/local/bin
 
 ## Limitations
 
 -   Requires root/administrator privileges
 -   Currently supports only IPv4
--   Basic ping functionality
--   Поддерживается только ICMP-пинг
+-   UDP ping relies on the target host responding to specific types of UDP packets (DNS queries on common ports)
+
+## Troubleshooting
+
+-   If UDP ping shows 100% packet loss, the target host may not be responding to the UDP packets. Try different ports or hosts.
+-   Ensure you have the necessary privileges to run the utility (sudo or administrator).
+-   Check your network firewall settings, as they might be blocking ICMP or UDP packets.
+
+## Future Improvements
+
+-   Add IPv6 support
+-   Implement more detailed error messages
+-   Add more protocol options (e.g., TCP ping)
+-   Enhanced statistics and graphing
+-   Configurable UDP packet types
+
+## License
+
+MIT License
