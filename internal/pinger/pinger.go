@@ -20,13 +20,13 @@ const (
 
 // PingConfig represents configuration for ping operations
 type PingConfig struct {
-	Host           string
-	PacketSize     int
-	Count          int
-	Timeout        time.Duration
-	IntervalMS     time.Duration
-	Protocol       PingProtocol
-	Port           int
+	Host       string
+	PacketSize int
+	Count      int
+	Timeout    time.Duration
+	Interval   time.Duration
+	Protocol   PingProtocol
+	Port       int
 }
 
 // PingResult stores the results of a ping attempt
@@ -45,13 +45,13 @@ type Pinger struct {
 // NewPinger creates a new Pinger with default or custom configuration
 func NewPinger(host string, options ...func(*PingConfig)) *Pinger {
 	config := PingConfig{
-		Host:           host,
-		PacketSize:     64,    // Default packet size
-		Count:          4,     // Default ping count
-		Timeout:        2 * time.Second,
-		IntervalMS:     1000 * time.Millisecond,
-		Protocol:       ProtocolICMP,
-		Port:           33434, // Default traceroute-like port for UDP
+		Host:       host,
+		PacketSize: 64, // Default packet size
+		Count:      4,  // Default ping count
+		Timeout:    2 * time.Second,
+		Interval:   1000 * time.Millisecond,
+		Protocol:   ProtocolICMP,
+		Port:       33434, // Default traceroute-like port for UDP
 	}
 
 	// Apply custom options
@@ -81,9 +81,9 @@ func WithTimeout(timeout time.Duration) func(*PingConfig) {
 	}
 }
 
-func WithInterval(intervalMS time.Duration) func(*PingConfig) {
+func WithInterval(interval time.Duration) func(*PingConfig) {
 	return func(pc *PingConfig) {
-		pc.IntervalMS = intervalMS
+		pc.Interval = interval
 	}
 }
 
@@ -210,7 +210,7 @@ func (p *Pinger) pingICMP() ([]PingResult, error) {
 		}
 
 		// Wait between pings
-		time.Sleep(p.config.IntervalMS)
+		time.Sleep(p.config.Interval)
 	}
 
 	return results, nil
@@ -300,7 +300,7 @@ func (p *Pinger) pingUDP() ([]PingResult, error) {
 		}
 
 		// Wait between pings
-		time.Sleep(p.config.IntervalMS)
+		time.Sleep(p.config.Interval)
 	}
 
 	return results, nil
@@ -336,7 +336,7 @@ func PrintResults(target string, results []PingResult) {
 				maxRTT = result.RTT
 			}
 
-			fmt.Printf("Reply from %s: bytes=%d time=%v\n", 
+			fmt.Printf("Reply from %s: bytes=%d time=%v\n",
 				target, len(result.Protocol), result.RTT)
 		} else {
 			fmt.Printf("Request timed out.\n")
@@ -346,7 +346,6 @@ func PrintResults(target string, results []PingResult) {
 	// Calculate statistics
 	successRate := float64(successCount) / float64(len(results)) * 100
 	var avgRTT time.Duration
-	// var mdevRTT time.Duration
 
 	if successCount > 0 {
 		avgRTT = totalRTT / time.Duration(successCount)
@@ -357,17 +356,16 @@ func PrintResults(target string, results []PingResult) {
 			diff := rtt - avgRTT
 			sumSquareDiff += diff * diff
 		}
-		// mdevRTT = time.Duration(float64(sumSquareDiff) / float64(successCount))
 	}
 
 	// Print summary
 	fmt.Printf("\nPing statistics for %s:\n", target)
-	fmt.Printf("\tPackets: Sent = %d, Received = %d, Lost = %d (%0.2f%% loss)\n", 
-		len(results), successCount, len(results) - successCount, 100 - successRate)
+	fmt.Printf("\tPackets: Sent = %d, Received = %d, Lost = %d (%0.2f%% loss)\n",
+		len(results), successCount, len(results)-successCount, 100-successRate)
 
 	if successCount > 0 {
 		fmt.Printf("Approximate round trip times in milli-seconds:\n")
-		fmt.Printf("\tMinimum = %vms, Maximum = %vms, Average = %vms\n", 
+		fmt.Printf("\tMinimum = %vms, Maximum = %vms, Average = %vms\n",
 			minRTT.Milliseconds(), maxRTT.Milliseconds(), avgRTT.Milliseconds())
 	}
 }

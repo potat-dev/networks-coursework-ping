@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"potat.dev/ping/internal/pinger"
-	// "github.com/yourusername/ping-utility/internal/pinger"
 )
 
 func main() {
