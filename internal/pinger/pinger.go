@@ -220,29 +220,23 @@ func (p *Pinger) pingICMP() ([]PingResult, error) {
 func (p *Pinger) pingUDP() ([]PingResult, error) {
 	// Use common DNS ports to increase chance of response
 	commonPorts := []int{53, 123, 8053, 33434}
-	
+
 	results := make([]PingResult, 0, p.config.Count)
 
-	// Try multiple ports if needed
-	for _, port := range commonPorts {
-		// Resolve the target host
-		raddr, err := net.ResolveUDPAddr("udp4", fmt.Sprintf("%s:%d", p.config.Host, port))
-		if err != nil {
-			continue
-		}
+	for seq := 1; seq <= p.config.Count; seq++ {
+		success := false
+		for _, port := range commonPorts {
+			// Resolve the target host
+			raddr, err := net.ResolveUDPAddr("udp4", fmt.Sprintf("%s:%d", p.config.Host, port))
+			if err != nil {
+				continue
+			}
 
-		for seq := 1; seq <= p.config.Count; seq++ {
 			// Create UDP connection
 			conn, err := net.DialTimeout("udp4", raddr.String(), p.config.Timeout)
 			if err != nil {
-				results = append(results, PingResult{
-					SequenceNumber: seq,
-					Success:        false,
-					Protocol:       ProtocolUDP,
-				})
 				continue
 			}
-			defer conn.Close()
 
 			// Prepare data (DNS query for Google's DNS)
 			data := []byte{
@@ -261,38 +255,25 @@ func (p *Pinger) pingUDP() ([]PingResult, error) {
 			start := time.Now()
 			_, err = conn.Write(data)
 			if err != nil {
-				results = append(results, PingResult{
-					SequenceNumber: seq,
-					Success:        false,
-					Protocol:       ProtocolUDP,
-				})
+				conn.Close()
 				continue
 			}
 
 			// Set read deadline
 			err = conn.SetReadDeadline(time.Now().Add(p.config.Timeout))
 			if err != nil {
-				results = append(results, PingResult{
-					SequenceNumber: seq,
-					Success:        false,
-					Protocol:       ProtocolUDP,
-				})
+				conn.Close()
 				continue
 			}
 
 			// Read response
 			rb := make([]byte, 1500)
 			_, err = conn.Read(rb)
-			
+
 			// Close connection immediately after read
 			conn.Close()
 
 			if err != nil {
-				results = append(results, PingResult{
-					SequenceNumber: seq,
-					Success:        false,
-					Protocol:       ProtocolUDP,
-				})
 				continue
 			}
 
@@ -306,15 +287,20 @@ func (p *Pinger) pingUDP() ([]PingResult, error) {
 				Success:        true,
 				Protocol:       ProtocolUDP,
 			})
-
-			// Wait between pings
-			time.Sleep(p.config.IntervalMS)
-
-			// If we got a successful ping, stop trying other ports
-			if results[len(results)-1].Success {
-				return results, nil
-			}
+			success = true
+			break // Break out of the port loop if successful
 		}
+
+		if !success {
+			results = append(results, PingResult{
+				SequenceNumber: seq,
+				Success:        false,
+				Protocol:       ProtocolUDP,
+			})
+		}
+
+		// Wait between pings
+		time.Sleep(p.config.IntervalMS)
 	}
 
 	return results, nil
