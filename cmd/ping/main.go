@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"potat.dev/ping/internal/pinger"
+	// "github.com/yourusername/ping-utility/internal/pinger"
 )
 
 func main() {
@@ -16,11 +17,23 @@ func main() {
 	packetSize := flag.Int("size", 64, "Size of ping packet")
 	timeout := flag.Duration("timeout", 2*time.Second, "Timeout for each ping")
 	interval := flag.Duration("interval", 1*time.Second, "Interval between pings")
-	protocol := flag.String("protocol", "icmp", "Protocol to use (icmp or udp)")
-	udpPort := flag.Int("udp-port", 33434, "Target UDP port for UDP ping")
+	protocol := flag.String("protocol", "icmp", "Ping protocol (icmp or udp)")
+	port := flag.Int("port", 33434, "Port to use for UDP ping")
 
 	// Parse command-line flags
 	flag.Parse()
+
+	// Validate protocol
+	var pingProtocol pinger.PingProtocol
+	switch *protocol {
+	case "icmp":
+		pingProtocol = pinger.ProtocolICMP
+	case "udp":
+		pingProtocol = pinger.ProtocolUDP
+	default:
+		fmt.Printf("Unsupported protocol: %s. Use 'icmp' or 'udp'\n", *protocol)
+		os.Exit(1)
+	}
 
 	// Create pinger with configured options
 	p := pinger.NewPinger(*host,
@@ -28,28 +41,17 @@ func main() {
 		pinger.WithPacketSize(*packetSize),
 		pinger.WithTimeout(*timeout),
 		pinger.WithInterval(*interval),
-		pinger.WithUDPPort(*udpPort),
+		pinger.WithProtocol(pingProtocol),
+		pinger.WithPort(*port),
 	)
 
 	// Perform ping
-	var results []pinger.PingResult
-	var err error
-
-	switch *protocol {
-	case "icmp":
-		results, err = p.Ping()
-	case "udp":
-		results, err = p.PingUDP()
-	default:
-		fmt.Printf("Invalid protocol: %s\n", *protocol)
-		os.Exit(1)
-	}
-
+	results, err := p.Ping()
 	if err != nil {
 		fmt.Printf("Ping error: %v\n", err)
 		os.Exit(1)
 	}
 
 	// Print results
-	pinger.PrintResults(results, *host, *packetSize, *protocol)
+	pinger.PrintResults(*host, results)
 }

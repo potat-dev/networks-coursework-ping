@@ -1,24 +1,33 @@
 package pinger
 
 import (
-	"encoding/binary"
 	"fmt"
 	"net"
 	"os"
+	// "strings"
 	"time"
 
 	"golang.org/x/net/icmp"
 	"golang.org/x/net/ipv4"
 )
 
+// PingProtocol defines the type of ping protocol
+type PingProtocol string
+
+const (
+	ProtocolICMP PingProtocol = "ICMP"
+	ProtocolUDP  PingProtocol = "UDP"
+)
+
 // PingConfig represents configuration for ping operations
 type PingConfig struct {
-	Host       string
-	PacketSize int
-	Count      int
-	Timeout    time.Duration
-	IntervalMS time.Duration
-	UDPPort    int
+	Host           string
+	PacketSize     int
+	Count          int
+	Timeout        time.Duration
+	IntervalMS     time.Duration
+	Protocol       PingProtocol
+	Port           int
 }
 
 // PingResult stores the results of a ping attempt
@@ -26,7 +35,7 @@ type PingResult struct {
 	SequenceNumber int
 	RTT            time.Duration
 	Success        bool
-	From           string
+	Protocol       PingProtocol
 }
 
 // Pinger handles the ping functionality
@@ -37,12 +46,13 @@ type Pinger struct {
 // NewPinger creates a new Pinger with default or custom configuration
 func NewPinger(host string, options ...func(*PingConfig)) *Pinger {
 	config := PingConfig{
-		Host:       host,
-		PacketSize: 64, // Default packet size
-		Count:      4,  // Default ping count
-		Timeout:    2 * time.Second,
-		IntervalMS: 1000 * time.Millisecond,
-		UDPPort:    33434, // Default UDP port
+		Host:           host,
+		PacketSize:     64,    // Default packet size
+		Count:          4,     // Default ping count
+		Timeout:        2 * time.Second,
+		IntervalMS:     1000 * time.Millisecond,
+		Protocol:       ProtocolICMP,
+		Port:           33434, // Default traceroute-like port for UDP
 	}
 
 	// Apply custom options
@@ -78,14 +88,32 @@ func WithInterval(intervalMS time.Duration) func(*PingConfig) {
 	}
 }
 
-func WithUDPPort(udpPort int) func(*PingConfig) {
+func WithProtocol(protocol PingProtocol) func(*PingConfig) {
 	return func(pc *PingConfig) {
-		pc.UDPPort = udpPort
+		pc.Protocol = protocol
+	}
+}
+
+func WithPort(port int) func(*PingConfig) {
+	return func(pc *PingConfig) {
+		pc.Port = port
 	}
 }
 
 // Ping performs the actual ping operation
 func (p *Pinger) Ping() ([]PingResult, error) {
+	switch p.config.Protocol {
+	case ProtocolICMP:
+		return p.pingICMP()
+	case ProtocolUDP:
+		return p.pingUDP()
+	default:
+		return nil, fmt.Errorf("unsupported protocol: %s", p.config.Protocol)
+	}
+}
+
+// pingICMP performs ICMP ping
+func (p *Pinger) pingICMP() ([]PingResult, error) {
 	// Resolve the target host
 	addr, err := net.ResolveIPAddr("ip4", p.config.Host)
 	if err != nil {
@@ -131,6 +159,7 @@ func (p *Pinger) Ping() ([]PingResult, error) {
 			results = append(results, PingResult{
 				SequenceNumber: seq,
 				Success:        false,
+				Protocol:       ProtocolICMP,
 			})
 			continue
 		}
@@ -142,11 +171,12 @@ func (p *Pinger) Ping() ([]PingResult, error) {
 			return nil, fmt.Errorf("set deadline error: %v", err)
 		}
 
-		n, from, err := conn.ReadFrom(rb)
+		n, _, err := conn.ReadFrom(rb)
 		if err != nil {
 			results = append(results, PingResult{
 				SequenceNumber: seq,
 				Success:        false,
+				Protocol:       ProtocolICMP,
 			})
 			continue
 		}
@@ -157,6 +187,7 @@ func (p *Pinger) Ping() ([]PingResult, error) {
 			results = append(results, PingResult{
 				SequenceNumber: seq,
 				Success:        false,
+				Protocol:       ProtocolICMP,
 			})
 			continue
 		}
@@ -169,12 +200,13 @@ func (p *Pinger) Ping() ([]PingResult, error) {
 				SequenceNumber: seq,
 				RTT:            rtt,
 				Success:        true,
-				From:           from.String(),
+				Protocol:       ProtocolICMP,
 			})
 		default:
 			results = append(results, PingResult{
 				SequenceNumber: seq,
 				Success:        false,
+				Protocol:       ProtocolICMP,
 			})
 		}
 
@@ -185,75 +217,80 @@ func (p *Pinger) Ping() ([]PingResult, error) {
 	return results, nil
 }
 
-// PingUDP performs the actual UDP ping operation
-func (p *Pinger) PingUDP() ([]PingResult, error) {
-	// Resolve the target host and port
-	udpAddr, err := net.ResolveUDPAddr("udp", fmt.Sprintf("%s:%d", p.config.Host, p.config.UDPPort))
+// pingUDP performs UDP ping
+func (p *Pinger) pingUDP() ([]PingResult, error) {
+	// Resolve the target host
+	raddr, err := net.ResolveUDPAddr("udp4", fmt.Sprintf("%s:%d", p.config.Host, p.config.Port))
 	if err != nil {
-		return nil, fmt.Errorf("UDP resolution error: %v", err)
+		return nil, fmt.Errorf("resolution error: %v", err)
 	}
-
-	// Create UDP connection
-	conn, err := net.DialUDP("udp", nil, udpAddr)
-	if err != nil {
-		return nil, fmt.Errorf("UDP dial error: %v", err)
-	}
-	defer conn.Close()
 
 	results := make([]PingResult, 0, p.config.Count)
 
 	for seq := 1; seq <= p.config.Count; seq++ {
-		// Prepare the data with process ID and sequence number
-		pid := os.Getpid() & 0xffff
-		data := make([]byte, p.config.PacketSize)
-		binary.BigEndian.PutUint16(data[0:2], uint16(pid))
-		binary.BigEndian.PutUint16(data[2:4], uint16(seq))
+		// Create UDP connection
+		conn, err := net.DialTimeout("udp4", raddr.String(), p.config.Timeout)
+		if err != nil {
+			results = append(results, PingResult{
+				SequenceNumber: seq,
+				Success:        false,
+				Protocol:       ProtocolUDP,
+			})
+			continue
+		}
+		defer conn.Close()
 
-		// Send the ping
+		// Prepare data
+		data := make([]byte, p.config.PacketSize)
+		for i := 0; i < p.config.PacketSize; i++ {
+			data[i] = byte(seq)
+		}
+
+		// Send ping
 		start := time.Now()
 		_, err = conn.Write(data)
 		if err != nil {
 			results = append(results, PingResult{
 				SequenceNumber: seq,
 				Success:        false,
+				Protocol:       ProtocolUDP,
+			})
+			continue
+		}
+
+		// Set read deadline
+		err = conn.SetReadDeadline(time.Now().Add(p.config.Timeout))
+		if err != nil {
+			results = append(results, PingResult{
+				SequenceNumber: seq,
+				Success:        false,
+				Protocol:       ProtocolUDP,
 			})
 			continue
 		}
 
 		// Read response
-		err = conn.SetReadDeadline(time.Now().Add(p.config.Timeout))
-		if err != nil {
-			return nil, fmt.Errorf("set UDP deadline error: %v", err)
-		}
-
-		buffer := make([]byte, 1500)
-		_, from, err := conn.ReadFromUDP(buffer)
+		rb := make([]byte, 1500)
+		_, err = conn.Read(rb)
 		if err != nil {
 			results = append(results, PingResult{
 				SequenceNumber: seq,
 				Success:        false,
+				Protocol:       ProtocolUDP,
 			})
 			continue
 		}
 
-		// Validate response
+		// Calculate RTT
 		rtt := time.Since(start)
-		receivedPid := int(binary.BigEndian.Uint16(buffer[0:2]))
-		receivedSeq := int(binary.BigEndian.Uint16(buffer[2:4]))
 
-		if receivedPid == pid && receivedSeq == seq {
-			results = append(results, PingResult{
-				SequenceNumber: seq,
-				RTT:            rtt,
-				Success:        true,
-				From:           from.String(),
-			})
-		} else {
-			results = append(results, PingResult{
-				SequenceNumber: seq,
-				Success:        false,
-			})
-		}
+		// Successful ping
+		results = append(results, PingResult{
+			SequenceNumber: seq,
+			RTT:            rtt,
+			Success:        true,
+			Protocol:       ProtocolUDP,
+		})
 
 		// Wait between pings
 		time.Sleep(p.config.IntervalMS)
@@ -262,53 +299,68 @@ func (p *Pinger) PingUDP() ([]PingResult, error) {
 	return results, nil
 }
 
-// PrintResults displays ping results
-func PrintResults(results []PingResult, host string, packetSize int, protocol string) {
-	fmt.Printf("PING %s (%s) %d bytes of data using %s.\n", host, host, packetSize, protocol)
+// PrintResults displays ping results in a format similar to standard ping utility
+func PrintResults(target string, results []PingResult) {
+	if len(results) == 0 {
+		fmt.Printf("No ping attempts made to %s\n", target)
+		return
+	}
+
+	// Print header
+	fmt.Printf("Pinging %s using %s protocol:\n\n", target, results[0].Protocol)
 
 	successCount := 0
-	var min, max, total time.Duration
+	totalRTT := time.Duration(0)
+	minRTT := time.Duration(0)
+	maxRTT := time.Duration(0)
+	rtts := []time.Duration{}
 
+	// Compute statistics
 	for _, result := range results {
 		if result.Success {
-			if protocol == "udp" {
-				fmt.Printf("%d bytes from %s: udp_seq=%d time=%v\n",
-					packetSize, result.From, result.SequenceNumber, result.RTT)
-			} else {
-				fmt.Printf("%d bytes from %s: icmp_seq=%d time=%v\n",
-					packetSize, result.From, result.SequenceNumber, result.RTT)
-			}
-
 			successCount++
+			totalRTT += result.RTT
+			rtts = append(rtts, result.RTT)
 
-			if min == 0 || result.RTT < min {
-				min = result.RTT
+			if minRTT == 0 || result.RTT < minRTT {
+				minRTT = result.RTT
 			}
-			if max == 0 || result.RTT > max {
-				max = result.RTT
+			if result.RTT > maxRTT {
+				maxRTT = result.RTT
 			}
-			total += result.RTT
+
+			fmt.Printf("Reply from %s: bytes=%d time=%v\n", 
+				target, len(result.Protocol), result.RTT)
 		} else {
-			if protocol == "udp" {
-				fmt.Printf("Request timeout for udp_seq %d\n", result.SequenceNumber)
-			} else {
-				fmt.Printf("Request timeout for icmp_seq %d\n", result.SequenceNumber)
-			}
+			fmt.Printf("Request timed out.\n")
 		}
 	}
 
 	// Calculate statistics
-	packetLoss := float64(len(results)-successCount) / float64(len(results)) * 100
-	var avg time.Duration
+	successRate := float64(successCount) / float64(len(results)) * 100
+	var avgRTT time.Duration
+	// var mdevRTT time.Duration
+
 	if successCount > 0 {
-		avg = total / time.Duration(successCount)
+		avgRTT = totalRTT / time.Duration(successCount)
+
+		// Calculate mean deviation (mdev)
+		var sumSquareDiff time.Duration
+		for _, rtt := range rtts {
+			diff := rtt - avgRTT
+			sumSquareDiff += diff * diff
+		}
+		// mdevRTT = time.Duration(float64(sumSquareDiff) / float64(successCount))
 	}
 
-	fmt.Printf("--- %s ping statistics ---\n", host)
-	fmt.Printf("%d packets transmitted, %d received, %.1f%% packet loss, time %dms\n",
-		len(results), successCount, packetLoss, total.Milliseconds())
+	// Print summary
+	fmt.Printf("\nPing statistics for %s:\n", target)
+	fmt.Printf("\tPackets: Sent = %d, Received = %d, Lost = %d (%0.2f%% loss)\n", 
+		len(results), successCount, len(results) - successCount, 100 - successRate)
 
 	if successCount > 0 {
-		fmt.Printf("rtt min/avg/max = %v/%v/%v\n", min, avg, max)
+		fmt.Printf("Approximate round trip times in milli-seconds:\n")
+		fmt.Printf("\tMinimum = %vms, Maximum = %vms, Average = %vms\n", 
+			minRTT.Milliseconds(), maxRTT.Milliseconds(), avgRTT.Milliseconds())
 	}
 }
