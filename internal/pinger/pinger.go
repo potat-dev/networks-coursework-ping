@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"net"
 	"os"
-	// "strings"
 	"time"
 
 	"golang.org/x/net/icmp"
@@ -219,81 +218,103 @@ func (p *Pinger) pingICMP() ([]PingResult, error) {
 
 // pingUDP performs UDP ping
 func (p *Pinger) pingUDP() ([]PingResult, error) {
-	// Resolve the target host
-	raddr, err := net.ResolveUDPAddr("udp4", fmt.Sprintf("%s:%d", p.config.Host, p.config.Port))
-	if err != nil {
-		return nil, fmt.Errorf("resolution error: %v", err)
-	}
-
+	// Use common DNS ports to increase chance of response
+	commonPorts := []int{53, 123, 8053, 33434}
+	
 	results := make([]PingResult, 0, p.config.Count)
 
-	for seq := 1; seq <= p.config.Count; seq++ {
-		// Create UDP connection
-		conn, err := net.DialTimeout("udp4", raddr.String(), p.config.Timeout)
+	// Try multiple ports if needed
+	for _, port := range commonPorts {
+		// Resolve the target host
+		raddr, err := net.ResolveUDPAddr("udp4", fmt.Sprintf("%s:%d", p.config.Host, port))
 		if err != nil {
-			results = append(results, PingResult{
-				SequenceNumber: seq,
-				Success:        false,
-				Protocol:       ProtocolUDP,
-			})
-			continue
-		}
-		defer conn.Close()
-
-		// Prepare data
-		data := make([]byte, p.config.PacketSize)
-		for i := 0; i < p.config.PacketSize; i++ {
-			data[i] = byte(seq)
-		}
-
-		// Send ping
-		start := time.Now()
-		_, err = conn.Write(data)
-		if err != nil {
-			results = append(results, PingResult{
-				SequenceNumber: seq,
-				Success:        false,
-				Protocol:       ProtocolUDP,
-			})
 			continue
 		}
 
-		// Set read deadline
-		err = conn.SetReadDeadline(time.Now().Add(p.config.Timeout))
-		if err != nil {
+		for seq := 1; seq <= p.config.Count; seq++ {
+			// Create UDP connection
+			conn, err := net.DialTimeout("udp4", raddr.String(), p.config.Timeout)
+			if err != nil {
+				results = append(results, PingResult{
+					SequenceNumber: seq,
+					Success:        false,
+					Protocol:       ProtocolUDP,
+				})
+				continue
+			}
+			defer conn.Close()
+
+			// Prepare data (DNS query for Google's DNS)
+			data := []byte{
+				0x00, 0x01, // Transaction ID
+				0x01, 0x00, // Flags (standard query)
+				0x00, 0x01, // Questions: 1
+				0x00, 0x00, // Answer RRs: 0
+				0x00, 0x00, // Authority RRs: 0
+				0x00, 0x00, // Additional RRs: 0
+				0x07, 'g', 'o', 'o', 'g', 'l', 'e', 0x03, 'c', 'o', 'm', 0x00, // Domain name
+				0x00, 0x01, // Type: A (IPv4 address)
+				0x00, 0x01, // Class: IN
+			}
+
+			// Send ping
+			start := time.Now()
+			_, err = conn.Write(data)
+			if err != nil {
+				results = append(results, PingResult{
+					SequenceNumber: seq,
+					Success:        false,
+					Protocol:       ProtocolUDP,
+				})
+				continue
+			}
+
+			// Set read deadline
+			err = conn.SetReadDeadline(time.Now().Add(p.config.Timeout))
+			if err != nil {
+				results = append(results, PingResult{
+					SequenceNumber: seq,
+					Success:        false,
+					Protocol:       ProtocolUDP,
+				})
+				continue
+			}
+
+			// Read response
+			rb := make([]byte, 1500)
+			_, err = conn.Read(rb)
+			
+			// Close connection immediately after read
+			conn.Close()
+
+			if err != nil {
+				results = append(results, PingResult{
+					SequenceNumber: seq,
+					Success:        false,
+					Protocol:       ProtocolUDP,
+				})
+				continue
+			}
+
+			// Calculate RTT
+			rtt := time.Since(start)
+
+			// Successful ping
 			results = append(results, PingResult{
 				SequenceNumber: seq,
-				Success:        false,
+				RTT:            rtt,
+				Success:        true,
 				Protocol:       ProtocolUDP,
 			})
-			continue
+
+			// Wait between pings
+			time.Sleep(p.config.IntervalMS)
+
+			// If we got a successful ping, stop trying other ports
+			if results[len(results)-1].Success {
+				return results, nil
+			}
 		}
-
-		// Read response
-		rb := make([]byte, 1500)
-		_, err = conn.Read(rb)
-		if err != nil {
-			results = append(results, PingResult{
-				SequenceNumber: seq,
-				Success:        false,
-				Protocol:       ProtocolUDP,
-			})
-			continue
-		}
-
-		// Calculate RTT
-		rtt := time.Since(start)
-
-		// Successful ping
-		results = append(results, PingResult{
-			SequenceNumber: seq,
-			RTT:            rtt,
-			Success:        true,
-			Protocol:       ProtocolUDP,
-		})
-
-		// Wait between pings
-		time.Sleep(p.config.IntervalMS)
 	}
 
 	return results, nil
