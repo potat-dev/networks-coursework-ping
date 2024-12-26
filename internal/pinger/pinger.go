@@ -31,10 +31,12 @@ type PingConfig struct {
 
 // PingResult stores the results of a ping attempt
 type PingResult struct {
-	SequenceNumber int
-	RTT            time.Duration
-	Success        bool
-	Protocol       PingProtocol
+	SequenceNumber  int
+	RTT             time.Duration
+	Success         bool
+	Protocol        PingProtocol
+	DataSentSize    int
+	DataReceiveSize int
 }
 
 // Pinger handles the ping functionality
@@ -151,6 +153,18 @@ func (p *Pinger) pingICMP() ([]PingResult, error) {
 			return nil, fmt.Errorf("marshal error: %v", err)
 		}
 
+		// Calculate the actual size of data sent
+		dataSentSize := 0
+		if seq <= 255 {
+			dataSentSize = 1
+		} else if seq <= 65535 {
+			dataSentSize = 2
+		} else if seq <= 16777215 {
+			dataSentSize = 3
+		} else {
+			dataSentSize = 4
+		}
+
 		// Send the ping
 		start := time.Now()
 		_, err = conn.WriteTo(wb, addr)
@@ -196,10 +210,12 @@ func (p *Pinger) pingICMP() ([]PingResult, error) {
 		switch rm.Type {
 		case ipv4.ICMPTypeEchoReply:
 			results = append(results, PingResult{
-				SequenceNumber: seq,
-				RTT:            rtt,
-				Success:        true,
-				Protocol:       ProtocolICMP,
+				SequenceNumber:  seq,
+				RTT:             rtt,
+				Success:         true,
+				Protocol:        ProtocolICMP,
+				DataSentSize:    dataSentSize, // Record data sent size
+				DataReceiveSize: n,            // Record data received size
 			})
 		default:
 			results = append(results, PingResult{
@@ -251,6 +267,9 @@ func (p *Pinger) pingUDP() ([]PingResult, error) {
 				0x00, 0x01, // Class: IN
 			}
 
+			// Calculate the size of the DNS query
+			dataSentSize := len(data)
+
 			// Send ping
 			start := time.Now()
 			_, err = conn.Write(data)
@@ -268,7 +287,7 @@ func (p *Pinger) pingUDP() ([]PingResult, error) {
 
 			// Read response
 			rb := make([]byte, 1500)
-			_, err = conn.Read(rb)
+			n, err := conn.Read(rb) // Read data into rb and get the number of bytes read
 
 			// Close connection immediately after read
 			conn.Close()
@@ -282,11 +301,17 @@ func (p *Pinger) pingUDP() ([]PingResult, error) {
 
 			// Successful ping
 			results = append(results, PingResult{
-				SequenceNumber: seq,
-				RTT:            rtt,
-				Success:        true,
-				Protocol:       ProtocolUDP,
+				SequenceNumber:  seq,
+				RTT:             rtt,
+				Success:         true,
+				Protocol:        ProtocolUDP,
+				DataSentSize:    dataSentSize, // Record data sent size
+				DataReceiveSize: n,            // Record data received size
 			})
+			// Print the actual size of data sent for UDP
+			fmt.Printf("Reply from %s: protocol=%s time=%v (data sent size: %d)\n",
+				p.config.Host, ProtocolUDP, rtt, dataSentSize)
+
 			success = true
 			break // Break out of the port loop if successful
 		}
@@ -322,6 +347,10 @@ func PrintResults(target string, results []PingResult) {
 	maxRTT := time.Duration(0)
 	rtts := []time.Duration{}
 
+	// Initialize total sent and received sizes
+	totalDataSent := 0
+	totalDataReceived := 0
+
 	// Compute statistics
 	for _, result := range results {
 		if result.Success {
@@ -336,8 +365,12 @@ func PrintResults(target string, results []PingResult) {
 				maxRTT = result.RTT
 			}
 
-			fmt.Printf("Reply from %s: bytes=%d time=%v\n",
-				target, len(result.Protocol), result.RTT)
+			// Accumulate sent and received sizes
+			totalDataSent += result.DataSentSize
+			totalDataReceived += result.DataReceiveSize
+
+			fmt.Printf("Reply from %s: bytes=%d time=%v (data sent size: %d)\n",
+				target, result.DataReceiveSize, result.RTT, result.DataSentSize)
 		} else {
 			fmt.Printf("Request timed out.\n")
 		}
@@ -367,5 +400,8 @@ func PrintResults(target string, results []PingResult) {
 		fmt.Printf("Approximate round trip times in milli-seconds:\n")
 		fmt.Printf("\tMinimum = %vms, Maximum = %vms, Average = %vms\n",
 			minRTT.Milliseconds(), maxRTT.Milliseconds(), avgRTT.Milliseconds())
+
+		// Print total data sent and received
+		fmt.Printf("Total data sent: %d bytes, Total data received: %d bytes\n", totalDataSent, totalDataReceived)
 	}
 }
