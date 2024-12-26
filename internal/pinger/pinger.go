@@ -103,6 +103,9 @@ func WithPort(port int) func(*PingConfig) {
 
 // Ping performs the actual ping operation
 func (p *Pinger) Ping() ([]PingResult, error) {
+	// Print header before starting the ping process
+	fmt.Printf("Pinging %s using %s protocol:\n\n", p.config.Host, p.config.Protocol)
+
 	switch p.config.Protocol {
 	case ProtocolICMP:
 		return p.pingICMP()
@@ -174,6 +177,7 @@ func (p *Pinger) pingICMP() ([]PingResult, error) {
 				Success:        false,
 				Protocol:       ProtocolICMP,
 			})
+			fmt.Printf("Request timed out.\n")
 			continue
 		}
 
@@ -191,6 +195,7 @@ func (p *Pinger) pingICMP() ([]PingResult, error) {
 				Success:        false,
 				Protocol:       ProtocolICMP,
 			})
+			fmt.Printf("Request timed out.\n")
 			continue
 		}
 
@@ -202,6 +207,7 @@ func (p *Pinger) pingICMP() ([]PingResult, error) {
 				Success:        false,
 				Protocol:       ProtocolICMP,
 			})
+			fmt.Printf("Request timed out.\n")
 			continue
 		}
 
@@ -217,12 +223,15 @@ func (p *Pinger) pingICMP() ([]PingResult, error) {
 				DataSentSize:    dataSentSize, // Record data sent size
 				DataReceiveSize: n,            // Record data received size
 			})
+			fmt.Printf("Reply from %s: bytes=%d time=%v\n",
+				p.config.Host, n, rtt)
 		default:
 			results = append(results, PingResult{
 				SequenceNumber: seq,
 				Success:        false,
 				Protocol:       ProtocolICMP,
 			})
+			fmt.Printf("Request timed out.\n")
 		}
 
 		// Wait between pings
@@ -293,6 +302,7 @@ func (p *Pinger) pingUDP() ([]PingResult, error) {
 			conn.Close()
 
 			if err != nil {
+				fmt.Printf("Request timed out.\n")
 				continue
 			}
 
@@ -308,9 +318,8 @@ func (p *Pinger) pingUDP() ([]PingResult, error) {
 				DataSentSize:    dataSentSize, // Record data sent size
 				DataReceiveSize: n,            // Record data received size
 			})
-			// Print the actual size of data sent for UDP
-			fmt.Printf("Reply from %s: protocol=%s time=%v (data sent size: %d)\n",
-				p.config.Host, ProtocolUDP, rtt, dataSentSize)
+			fmt.Printf("Reply from %s: bytes=%d time=%v\n",
+				p.config.Host, n, rtt)
 
 			success = true
 			break // Break out of the port loop if successful
@@ -322,6 +331,7 @@ func (p *Pinger) pingUDP() ([]PingResult, error) {
 				Success:        false,
 				Protocol:       ProtocolUDP,
 			})
+			fmt.Printf("Request timed out.\n")
 		}
 
 		// Wait between pings
@@ -333,14 +343,6 @@ func (p *Pinger) pingUDP() ([]PingResult, error) {
 
 // PrintResults displays ping results in a format similar to standard ping utility
 func PrintResults(target string, results []PingResult) {
-	if len(results) == 0 {
-		fmt.Printf("No ping attempts made to %s\n", target)
-		return
-	}
-
-	// Print header
-	fmt.Printf("Pinging %s using %s protocol:\n\n", target, results[0].Protocol)
-
 	successCount := 0
 	totalRTT := time.Duration(0)
 	minRTT := time.Duration(0)
@@ -368,11 +370,6 @@ func PrintResults(target string, results []PingResult) {
 			// Accumulate sent and received sizes
 			totalDataSent += result.DataSentSize
 			totalDataReceived += result.DataReceiveSize
-
-			fmt.Printf("Reply from %s: bytes=%d time=%v (data sent size: %d)\n",
-				target, result.DataReceiveSize, result.RTT, result.DataSentSize)
-		} else {
-			fmt.Printf("Request timed out.\n")
 		}
 	}
 
